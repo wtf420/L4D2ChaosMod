@@ -259,4 +259,9 @@
 	{
 		"en"	"Randomise special infected"
 	}
+
+	"Effect Silent Hill"
+	{
+		"en"	"Silent Hill"
+	}
 }
