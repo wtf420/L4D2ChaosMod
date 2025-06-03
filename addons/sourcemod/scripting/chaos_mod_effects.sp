@@ -61,6 +61,7 @@ public void OnPluginStart()
 	RegAdminCmd("chaosmod_vomitplayer", Command_VomitPlayer, ADMFLAG_ROOT, "Vomits the desired player");
 	RegAdminCmd("chaosmod_sizeplayer", Command_SizePlayer, ADMFLAG_ROOT, "Resize a player's model (Most likely, their pants)");
 	RegAdminCmd("chaosmod_entityrain", Command_EntityRain, ADMFLAG_ROOT, "Will rain the specified entity");
+	RegAdminCmd("chaosmod_killallwitches", Command_KillAllWitches, ADMFLAG_ROOT, "Will kill all witches in the map");
 	RegAdminCmd("chaosmod_cheat", Command_Cheat, ADMFLAG_ROOT, "Runs cheat commands with sv_cheats 0");
 	RegAdminCmd("chaosmod_cvar", Command_CvarSilent, ADMFLAG_ROOT, "Changes cvar without notifying clients");
 	RegAdminCmd("chaosmod_zspeed", Command_ZSpeed, ADMFLAG_ROOT, "Changes speed of the infected");

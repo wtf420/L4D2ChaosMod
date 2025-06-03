@@ -3,8 +3,8 @@
 
 #define DEBUG
 
-#define PLUGIN_AUTHOR "T0M50N"
-#define PLUGIN_VERSION "1.2.1"
+#define PLUGIN_AUTHOR "T0M50N & SauceMaster"
+#define PLUGIN_VERSION "1.3"
 
 #include <sourcemod>
 #include <sdktools>
@@ -15,11 +15,11 @@
 
 public Plugin myinfo = 
 {
-	name = "L4D2 Chaos Mod",
+	name = "L4D2 Chaos Mod Alternative",
 	author = PLUGIN_AUTHOR,
 	description = "Activates a random effect every 30 seconds.",
 	version = PLUGIN_VERSION,
-	url = "https://github.com/t0m50n/L4D2ChaosMod"
+	url = "github.com/wtf420/L4D2ChaosMod"
 };
 
 #define EFFECTS_PATH "configs/effects.cfg"
@@ -42,6 +42,8 @@ ConVar g_time_between_effects;
 ConVar g_short_time_duration;
 ConVar g_normal_time_duration;
 ConVar g_long_time_duration;
+
+bool bChaosModStarted = false;
 
 #include "parse.sp"
 
@@ -69,8 +71,16 @@ public void OnPluginStart()
 	g_time_between_effects.AddChangeHook(Cvar_TimeBetweenEffectsChanged);
 	g_enabled.AddChangeHook(Cvar_EnabledChanged);
 	HookEvent("server_cvar", Event_Cvar, EventHookMode_Pre);
-	g_effect_timer = CreateTimer(g_time_between_effects.FloatValue, Timer_StartRandomEffect, _, TIMER_REPEAT);
-	g_panel_timer = CreateTimer(PANEL_UPDATE_RATE, Timer_UpdatePanel, _, TIMER_REPEAT);
+	
+	bChaosModStarted = false;
+	// on map transition, disable chaos mod and does not enable it until exit the next safe room
+	HookEvent("round_start", Event_RoundStart);
+	// try start chaos mods when player start campaign and exit the starting area, this does not fire if you die and have to restart the map
+	HookEvent("player_left_start_area", ActivateChaosmod);
+	// try start chaos mods when player start round and exit safe room, this does fire if you die and have to restart the map, so both event is needed
+	HookEvent("player_left_safe_area", ActivateChaosmod);
+	// on map transition, disable chaos mod and does not enable it until exit the next safe room
+	HookEvent("round_end", Event_RoundEnd);
 
 	/* See if the menu plugin is already ready */
 	TopMenu topmenu;
@@ -151,6 +161,40 @@ public Action Event_Cvar(Event event, const char[] name, bool dontBroadcast)
 		return Plugin_Continue;
 	}
 	return Plugin_Handled;
+}
+
+public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
+{
+	ShowActivity2(0, "[SM] ", "Round Started!");
+	if (bChaosModStarted)
+	{
+		delete g_effect_timer;
+		delete g_panel_timer;
+		bChaosModStarted = false;
+	}
+}
+
+public void ActivateChaosmod(Event event, const char[] name, bool dontBroadcast)
+{
+	ShowActivity2(0, "[SM] ", "Checking chaos mod!");
+	if (!bChaosModStarted)
+	{
+		ShowActivity2(0, "[SM] ", "Chaos Mod have started!");
+		g_effect_timer = CreateTimer(g_time_between_effects.FloatValue, Timer_StartRandomEffect, _, TIMER_REPEAT);
+		g_panel_timer = CreateTimer(PANEL_UPDATE_RATE, Timer_UpdatePanel, _, TIMER_REPEAT);
+		bChaosModStarted = true;
+	}
+}
+
+public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast) 
+{
+	ShowActivity2(0, "[SM] ", "Round ended!");
+	if (bChaosModStarted)
+	{
+		delete g_effect_timer;
+		delete g_panel_timer;
+		bChaosModStarted = false;
+	}
 }
 
 public void Cvar_TimeBetweenEffectsChanged(ConVar convar, char[] oldValue, char[] newValue)

@@ -35,6 +35,26 @@ public Action Command_EntityRain(int client, int args)
 	return Plugin_Handled;
 }
 
+public Action Command_KillAllWitches(int client, int args)
+{
+	KillAllWitches();
+	ReplyToCommand(client, "[SM] Usage: KillAllWitches");
+	
+	return Plugin_Handled;
+}
+
+void KillAllWitches()
+{
+	int witch = -1;
+	while((witch = FindEntityByClassname(witch, "witch")) != -1)
+	{
+		if (IsValidEntity(witch))
+		{
+			AcceptEntityInput(witch, "Kill");
+		}
+	}
+}
+
 void EntityRain(int target, const char[] entity_name, int entity_count)
 {
 	if (!IsClientInGame(target) || !IsPlayerAlive(target))
