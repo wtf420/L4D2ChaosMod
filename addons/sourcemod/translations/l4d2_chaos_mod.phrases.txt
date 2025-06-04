@@ -264,4 +264,9 @@
 	{
 		"en"	"Silent Hill"
 	}
+
+	"Effect Too Many Chargers"
+	{
+		"en"	"Too Many Chargers"
+	}
 }
