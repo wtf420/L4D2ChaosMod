@@ -68,6 +68,7 @@ public void OnPluginStart()
 
 	RegAdminCmd("chaosmod_vote", Command_Vote, ADMFLAG_GENERIC, "Starts vote to enable/disable chaosmod");
 	RegAdminCmd("chaosmod_refresh", Command_Refresh, ADMFLAG_GENERIC, "Reloads effects from config");
+	RegAdminCmd("chaosmod_stop", Command_StopAllActiveEffect, ADMFLAG_GENERIC, "Stop all currently active effects");
 	g_time_between_effects.AddChangeHook(Cvar_TimeBetweenEffectsChanged);
 	g_enabled.AddChangeHook(Cvar_EnabledChanged);
 	HookEvent("server_cvar", Event_Cvar, EventHookMode_Pre);
@@ -165,7 +166,6 @@ public Action Event_Cvar(Event event, const char[] name, bool dontBroadcast)
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
-	ShowActivity2(0, "[SM] ", "Round Started!");
 	if (bChaosModStarted)
 	{
 		delete g_effect_timer;
@@ -176,7 +176,6 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 
 public void ActivateChaosmod(Event event, const char[] name, bool dontBroadcast)
 {
-	ShowActivity2(0, "[SM] ", "Checking chaos mod!");
 	if (!bChaosModStarted)
 	{
 		ShowActivity2(0, "[SM] ", "Chaos Mod have started!");
@@ -188,17 +187,18 @@ public void ActivateChaosmod(Event event, const char[] name, bool dontBroadcast)
 
 public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast) 
 {
-	ShowActivity2(0, "[SM] ", "Round ended!");
 	if (bChaosModStarted)
 	{
 		delete g_effect_timer;
 		delete g_panel_timer;
 		bChaosModStarted = false;
+		StopAllActiveEffects();
 	}
 }
 
 public void Cvar_TimeBetweenEffectsChanged(ConVar convar, char[] oldValue, char[] newValue)
 {
+	ShowActivity2(0, "[SM] ", "TimeBetweenEffectsChanged!");
 	if (!g_enabled.BoolValue)
 	{
 		return;
@@ -213,15 +213,20 @@ public void Cvar_EnabledChanged(ConVar convar, char[] oldValue, char[] newValue)
 {
 	if (!g_enabled.BoolValue)
 	{
-		// Disable all currently active effects
-		for (int i = 0; i < g_active_effects.Length; i++)
-		{
-			StringMap active_effect = view_as<StringMap>(g_active_effects.Get(i));
-			StopEffect(active_effect);
-			delete active_effect;
-		}
-		g_active_effects.Clear();
+		StopAllActiveEffects();
 	}
+}
+
+public void StopAllActiveEffects()
+{
+	// Disable all currently active effects
+	for (int i = 0; i < g_active_effects.Length; i++)
+	{
+		StringMap active_effect = view_as<StringMap>(g_active_effects.Get(i));
+		StopEffect(active_effect);
+		delete active_effect;
+	}
+	g_active_effects.Clear();
 }
 
 public int Panel_DoNothing(Menu menu, MenuAction action, int param1, int param2) {}
@@ -264,6 +269,13 @@ public int Vote_Callback(Menu menu, MenuAction action, int param1, int param2)
 			g_enabled.SetString(enable);
 		}
 	}
+}
+
+public Action Command_StopAllActiveEffect(int client, int args)
+{
+	ReplyToCommand(client, "All active chaosmod effects have stopped!");
+	StopAllActiveEffects();
+	return Plugin_Handled;
 }
 
 public Action Command_Refresh(int client, int args)
