@@ -168,6 +168,7 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
 	if (bChaosModStarted)
 	{
+		StopAllActiveEffects();
 		delete g_effect_timer;
 		delete g_panel_timer;
 		bChaosModStarted = false;
@@ -189,10 +190,11 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 {
 	if (bChaosModStarted)
 	{
-		delete g_effect_timer;
-		delete g_panel_timer;
+		ShowActivity2(0, "[SM] ", "Chaos Mod have ended!");
 		bChaosModStarted = false;
 		StopAllActiveEffects();
+		delete g_effect_timer;
+		delete g_panel_timer;
 	}
 }
 
@@ -397,6 +399,7 @@ public Action Timer_StartRandomEffect(Handle timer)
 	return Plugin_Handled;
 }
 
+// this is also used to update the effect timer as well
 public Action Timer_UpdatePanel(Handle timer, any unused)
 {
 	static int no_active_effects = 0;
@@ -407,6 +410,7 @@ public Action Timer_UpdatePanel(Handle timer, any unused)
 		return Plugin_Handled;
 	}
 
+	// an effect was triggered manually / timer trigger next effect
 	if (no_active_effects != g_active_effects.Length || time_until_next_effect < 0)
 	{
 		time_until_next_effect = g_time_between_effects.IntValue;
