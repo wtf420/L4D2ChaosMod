@@ -48,7 +48,6 @@ ArrayList Parse_KeyValueFile(const char[] path)
 		}
 		
 		kv.GetString("active_time", buffer, sizeof(buffer));
-		
 		float active_time = Parse_ActiveTime(buffer);
 		if (active_time < 0)
 		{
@@ -56,6 +55,19 @@ ArrayList Parse_KeyValueFile(const char[] path)
 			SetFailState("Invalid active time for effect: %s", buffer);
 		}
 		effect.SetString("active_time", buffer);
+
+		kv.GetString("cool_down_time", buffer, sizeof(buffer));
+		active_time = Parse_ActiveTime(buffer);
+		if (active_time < 0)
+		{
+			effect.GetString("name", buffer, sizeof(buffer));
+			SetFailState("Invalid cool down time for effect: %s", buffer);
+		}
+		effect.SetString("cool_down_time", buffer);
+
+		
+		kv.GetString("extent_type", buffer, sizeof(buffer));
+		effect.SetString("extent_type", buffer);
 		
 		effects.Push(effect);
 	} while (kv.GotoNextKey());

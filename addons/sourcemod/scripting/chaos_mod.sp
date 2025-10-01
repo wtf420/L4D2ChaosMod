@@ -30,6 +30,7 @@ public Plugin myinfo =
 
 ArrayList g_effects;
 ArrayList g_active_effects;
+ArrayList g_cooling_down_effects;
 StringMap g_EFFECT_DURATIONS;
 
 Handle g_effect_timer = INVALID_HANDLE;
@@ -59,16 +60,19 @@ public void OnPluginStart()
 	g_long_time_duration = CreateConVar("chaosmod_long_time_duration", "120", "A long effect will be enabled for this many seconds", FCVAR_NOTIFY, true, 0.1);
 
 	g_active_effects = new ArrayList();
+	g_cooling_down_effects = new ArrayList();
 	g_EFFECT_DURATIONS = new StringMap();
 	g_EFFECT_DURATIONS.SetValue("none", g_normal_time_duration);
 	g_EFFECT_DURATIONS.SetValue("short", g_short_time_duration);
 	g_EFFECT_DURATIONS.SetValue("normal", g_normal_time_duration);
 	g_EFFECT_DURATIONS.SetValue("long", g_long_time_duration);
 	g_effects = Parse_KeyValueFile(EFFECTS_PATH);
+	FilterAvailableEffect(g_effects);
 
 	RegAdminCmd("chaosmod_vote", Command_Vote, ADMFLAG_GENERIC, "Starts vote to enable/disable chaosmod");
 	RegAdminCmd("chaosmod_refresh", Command_Refresh, ADMFLAG_GENERIC, "Reloads effects from config");
 	RegAdminCmd("chaosmod_stop", Command_StopAllActiveEffect, ADMFLAG_GENERIC, "Stop all currently active effects");
+	RegAdminCmd("chaosmod_reset_cooldown", Command_ResetCoolDown, ADMFLAG_GENERIC, "Stop all currently active effects");
 	g_time_between_effects.AddChangeHook(Cvar_TimeBetweenEffectsChanged);
 	g_enabled.AddChangeHook(Cvar_EnabledChanged);
 	HookEvent("server_cvar", Event_Cvar, EventHookMode_Pre);
@@ -169,6 +173,7 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 	if (bChaosModStarted)
 	{
 		StopAllActiveEffects();
+		g_cooling_down_effects.Clear();
 		delete g_effect_timer;
 		delete g_panel_timer;
 		bChaosModStarted = false;
@@ -193,6 +198,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 		ShowActivity2(0, "[SM] ", "Chaos Mod have ended!");
 		bChaosModStarted = false;
 		StopAllActiveEffects();
+		g_cooling_down_effects.Clear();
 		delete g_effect_timer;
 		delete g_panel_timer;
 	}
@@ -216,6 +222,7 @@ public void Cvar_EnabledChanged(ConVar convar, char[] oldValue, char[] newValue)
 	if (!g_enabled.BoolValue)
 	{
 		StopAllActiveEffects();
+		g_cooling_down_effects.Clear();
 	}
 }
 
@@ -280,6 +287,13 @@ public Action Command_StopAllActiveEffect(int client, int args)
 	return Plugin_Handled;
 }
 
+public Action Command_ResetCoolDown(int client, int args)
+{
+	ReplyToCommand(client, "All active chaosmod cool downs have been reset!");
+	g_cooling_down_effects.Clear();
+	return Plugin_Handled;
+}
+
 public Action Command_Refresh(int client, int args)
 {
 	delete g_effects;
@@ -316,8 +330,51 @@ public Action Command_Start_Effect(int client, int args)
 
 void StartEffect(StringMap effect)
 {
-	StringMap active_effect = new StringMap();
 	char buffer[255];
+	effect.GetString("name", buffer, sizeof(buffer));
+	for (int i = 0; i < g_active_effects.Length; i++)
+	{
+		StringMap other_effect = view_as<StringMap>(g_active_effects.Get(i));
+		char name_other[255];
+		other_effect.GetString("name", name_other, sizeof(name_other));
+		if (StrEqual(buffer, name_other, false))
+		{
+			int time_left = 0;
+			other_effect.GetValue("time_left", time_left);
+			if (time_left <= 0) continue;
+
+			char extent_type_buffer[255];
+			effect.GetString("extent_type", extent_type_buffer, sizeof(extent_type_buffer));
+			if (StrEqual(extent_type_buffer, "duplicate", false))
+			{
+				// do nothing and just add like normal
+			}
+			else
+			{
+				if (StrEqual(extent_type_buffer, "none", false)) return;
+				// extent the duration
+				effect.GetString("active_time", buffer, sizeof(buffer));
+				float f_active_time = Parse_ActiveTime(buffer);
+				other_effect.SetValue("time_left", time_left + RoundToFloor(f_active_time));
+
+				if (StrEqual(extent_type_buffer, "extent", false)) return;
+				else if (StrEqual(extent_type_buffer, "end_and_repeat", false))
+				{
+					// execute the end commands
+					effect.GetString("end", buffer, sizeof(buffer));
+					ServerCommand(buffer);
+				}
+
+				// extent_type is "repeat", execute the start commands
+				effect.GetString("start", buffer, sizeof(buffer));
+				ServerCommand(buffer);
+
+				return;
+			}
+		}
+	}
+
+	StringMap active_effect = new StringMap();
 	
 	effect.GetString("start", buffer, sizeof(buffer));
 	ServerCommand(buffer);
@@ -334,6 +391,9 @@ void StartEffect(StringMap effect)
 	active_effect.SetValue("time_left", RoundToFloor(f_active_time));
 	active_effect.SetValue("is_timed_effect", !StrEqual(buffer, "none", false));
 	
+	effect.GetString("cool_down_time", buffer, sizeof(buffer));
+	active_effect.SetString("cool_down_time", buffer);
+	
 	g_active_effects.Push(active_effect);
 }
 
@@ -342,32 +402,69 @@ void StopEffect(StringMap active_effect)
 	char buffer[255];
 	active_effect.GetString("end", buffer, sizeof(buffer));
 	ServerCommand(buffer);
+
+	float f_cool_down_time = 0.0;
+	active_effect.GetString("name", buffer, sizeof(buffer));
+	for (int i = 0; i < g_cooling_down_effects.Length; i++)
+	{
+		StringMap other_effect = view_as<StringMap>(g_cooling_down_effects.Get(i));
+		char name_other[255];
+		other_effect.GetString("name", name_other, sizeof(name_other));
+		if (StrEqual(buffer, name_other, false))
+		{
+			active_effect.GetString("cool_down_time", buffer, sizeof(buffer));
+			f_cool_down_time = Parse_ActiveTime(buffer);
+			other_effect.SetValue("time_left", RoundToFloor(f_cool_down_time));
+			return;
+		}
+	}
+
+	StringMap cool_down_effect = new StringMap();
+	cool_down_effect.SetString("name", buffer);
+
+	active_effect.GetString("end", buffer, sizeof(buffer));
+	cool_down_effect.SetString("end", buffer);
+	
+	active_effect.GetString("cool_down_time", buffer, sizeof(buffer));
+	f_cool_down_time = Parse_ActiveTime(buffer);
+	cool_down_effect.SetValue("time_left", RoundToFloor(f_cool_down_time));
+
+	g_cooling_down_effects.Push(cool_down_effect);
 }
 
 StringMap AttemptChooseRandomEffect()
 {
-	int random_effect_i = GetRandomInt(0, g_effects.Length - 1);
-	StringMap effect = view_as<StringMap>(g_effects.Get(random_effect_i));
-
 	// Check if effect can be used on current map
-	ArrayList maps;
-	if (effect.GetValue("disable_on_maps", maps))
+	ArrayList available_effects = new ArrayList();
+	for (int i = 0; i < g_effects.Length; i++)
 	{
-		char current_map[64];
-		GetCurrentMap(current_map, sizeof(current_map));
-
-		for (int i = 0; i < maps.Length; i++)
+		StringMap effect = view_as<StringMap>(g_effects.Get(i));
+		char name[255];
+		effect.GetString("name", name, sizeof(name));
+		bool on_cool_down = false;
+		
+		for (int j = 0; j < g_cooling_down_effects.Length; j++)
 		{
-			char map[64];
-			maps.GetString(i, map, sizeof(map));
-			if (StrEqual(current_map, map))
+			StringMap other_effect = view_as<StringMap>(g_cooling_down_effects.Get(j));
+			char name_other[255];
+			other_effect.GetString("name", name_other, sizeof(name_other));
+			if (StrEqual(name, name_other, false))
 			{
-				return view_as<StringMap>(INVALID_HANDLE);
+				on_cool_down = true;
+				break;
 			}
 		}
+
+		if (!on_cool_down) available_effects.Push(effect);
 	}
 
-	return effect;
+	if (available_effects.Length > 0)
+	{
+		int random_effect_i = GetRandomInt(0, available_effects.Length - 1);
+		StringMap chosen_effect = view_as<StringMap>(available_effects.Get(random_effect_i));
+		return chosen_effect;
+	}
+	return view_as<StringMap>(INVALID_HANDLE);
 }
 
 public Action Timer_StartRandomEffect(Handle timer)
@@ -377,24 +474,11 @@ public Action Timer_StartRandomEffect(Handle timer)
 		return Plugin_Handled;
 	}
 
-	StringMap effect;
-	int i = 0;
-	while (i < EFFECT_CHOOSE_ATTEMPTS)
+	StringMap effect = AttemptChooseRandomEffect();
+	if (effect != INVALID_HANDLE)
 	{
-		effect = AttemptChooseRandomEffect();
-		if (effect != INVALID_HANDLE)
-		{
-			break;
-		}
-		i++;
+		StartEffect(effect);
 	}
-
-	if (i == EFFECT_CHOOSE_ATTEMPTS)
-	{
-		SetFailState("Could not pick random effect meeting requirements.");
-	}
-	
-	StartEffect(effect);
 
 	return Plugin_Handled;
 }
@@ -443,7 +527,7 @@ public Action Timer_UpdatePanel(Handle timer, any unused)
 		int time_left;
 		active_effect.GetValue("time_left", time_left);
 
-		if (time_left == 0)
+		if (time_left <= 0)
 		{
 			g_active_effects.Erase(i);
 			StopEffect(active_effect);
@@ -457,7 +541,55 @@ public Action Timer_UpdatePanel(Handle timer, any unused)
 	}
 	no_active_effects = g_active_effects.Length;
 
+	for (int i = g_cooling_down_effects.Length - 1; i >= 0; i--)
+	{
+		StringMap g_cooling_down_effect = view_as<StringMap>(g_cooling_down_effects.Get(i));
+
+		int time_left;
+		g_cooling_down_effect.GetValue("time_left", time_left);
+
+		if (time_left <= 0)
+		{
+			g_cooling_down_effects.Erase(i);
+			delete g_cooling_down_effect;
+		}
+		else
+		{
+			g_cooling_down_effect.SetValue("time_left", time_left - 1);
+		}
+		
+	}
+
 	return Plugin_Handled;
+}
+
+void FilterAvailableEffect(ArrayList &effects)
+{
+	int random_effect_i = GetRandomInt(0, g_effects.Length - 1);
+	StringMap effect = view_as<StringMap>(g_effects.Get(random_effect_i));
+
+	for (int i = effects.Length - 1; i >= 0; i--)
+	{
+		// Check if effect can be used on current map
+		ArrayList maps;
+		if (effect.GetValue("disable_on_maps", maps))
+		{
+			char current_map[64];
+			GetCurrentMap(current_map, sizeof(current_map));
+
+			for (int j = 0; j < maps.Length; j++)
+			{
+				char map[64];
+				maps.GetString(i, map, sizeof(map));
+				if (StrEqual(current_map, map))
+				{
+					g_effects.Erase(i);
+					delete effect;
+					continue;
+				}
+			}
+		}
+	}
 }
 
 Panel CreateEffectPanel(int client, float pbar_fullness)
@@ -472,6 +604,16 @@ Panel CreateEffectPanel(int client, float pbar_fullness)
 	{
 		StringMap active_effect = view_as<StringMap>(g_active_effects.Get(i));
 		DrawActiveEffectPanelText(p, client, active_effect);
+	}
+
+	if (g_cooling_down_effects.Length > 0)
+	{
+		p.DrawText("=== Effects On Cool down ===");
+		for (int i = g_cooling_down_effects.Length - 1; i >= 0; i--)
+		{
+			StringMap cooling_down_effect = view_as<StringMap>(g_cooling_down_effects.Get(i));
+			DrawCoolingDownEffectPanelText(p, client, cooling_down_effect);
+		}
 	}
 
 	return p;
@@ -518,6 +660,22 @@ void DrawActiveEffectPanelText(Panel panel, int client, StringMap active_effect)
 	{
 		Format(panel_text, sizeof(panel_text), "%T", effect_tran_name, client);
 	}
+
+	panel.DrawText(panel_text);
+}
+
+void DrawCoolingDownEffectPanelText(Panel panel, int client, StringMap cool_down_effect)
+{
+	int time_left;
+	cool_down_effect.GetValue("time_left", time_left);
+	
+	char effect_name[255];
+	cool_down_effect.GetString("name", effect_name, sizeof(effect_name));
+	char effect_tran_name[255];
+	Format(effect_tran_name, sizeof(effect_tran_name), "Effect %s", effect_name);
+	
+	char panel_text[255];
+	Format(panel_text, sizeof(panel_text), "%T (%d)", effect_tran_name, client, time_left);
 
 	panel.DrawText(panel_text);
 }
