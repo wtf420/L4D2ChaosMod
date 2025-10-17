@@ -33,7 +33,7 @@ ArrayList g_active_effects;
 ArrayList g_cooling_down_effects;
 StringMap g_EFFECT_DURATIONS;
 
-Handle g_effect_timer = INVALID_HANDLE;
+// Handle g_effect_timer = INVALID_HANDLE;
 Handle g_panel_timer = INVALID_HANDLE;
 
 TopMenu g_admin_menu = null;
@@ -81,9 +81,9 @@ public void OnPluginStart()
 	// on map transition, disable chaos mod and does not enable it until exit the next safe room
 	HookEvent("round_start", Event_RoundStart);
 	// try start chaos mods when player start campaign and exit the starting area, this does not fire if you die and have to restart the map
-	HookEvent("player_left_start_area", ActivateChaosmod);
+	HookEvent("player_left_start_area", Event_RoundStart);
 	// try start chaos mods when player start round and exit safe room, this does fire if you die and have to restart the map, so both event is needed
-	HookEvent("player_left_safe_area", ActivateChaosmod);
+	HookEvent("player_left_safe_area", Event_RoundStart);
 	// on map transition, disable chaos mod and does not enable it until exit the next safe room
 	HookEvent("round_end", Event_RoundEnd);
 
@@ -168,26 +168,48 @@ public Action Event_Cvar(Event event, const char[] name, bool dontBroadcast)
 	return Plugin_Handled;
 }
 
-public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
+public void OnMapStart()
+{
+	g_active_effects.Clear();
+	g_cooling_down_effects.Clear();
+	if (g_panel_timer != INVALID_HANDLE) delete g_panel_timer;
+	bChaosModStarted = false;
+}
+
+public void OnMapEnd()
 {
 	if (bChaosModStarted)
 	{
-		StopAllActiveEffects();
-		g_cooling_down_effects.Clear();
-		delete g_effect_timer;
-		delete g_panel_timer;
-		bChaosModStarted = false;
+		EndChaosMod();
 	}
 }
 
-public void ActivateChaosmod(Event event, const char[] name, bool dontBroadcast)
+public void StartChaosMod()
+{
+	g_active_effects.Clear();
+	g_cooling_down_effects.Clear();
+	if (g_panel_timer != INVALID_HANDLE) delete g_panel_timer;
+	ShowActivity2(0, "[SM] ", "Chaos Mod have started!");
+	// g_effect_timer = CreateTimer(g_time_between_effects.FloatValue, Timer_StartRandomEffect, _, TIMER_REPEAT);
+	g_panel_timer = CreateTimer(PANEL_UPDATE_RATE, Timer_UpdatePanel, _, TIMER_REPEAT);
+	bChaosModStarted = true;
+}
+
+public void EndChaosMod()
+{
+	StopAllActiveEffects();
+	g_active_effects.Clear();
+	g_cooling_down_effects.Clear();
+	// delete g_effect_timer;
+	delete g_panel_timer;
+	bChaosModStarted = false;
+}
+
+public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
 	if (!bChaosModStarted)
 	{
-		ShowActivity2(0, "[SM] ", "Chaos Mod have started!");
-		g_effect_timer = CreateTimer(g_time_between_effects.FloatValue, Timer_StartRandomEffect, _, TIMER_REPEAT);
-		g_panel_timer = CreateTimer(PANEL_UPDATE_RATE, Timer_UpdatePanel, _, TIMER_REPEAT);
-		bChaosModStarted = true;
+		StartChaosMod();
 	}
 }
 
@@ -195,12 +217,7 @@ public void Event_RoundEnd(Event event, const char[] name, bool dontBroadcast)
 {
 	if (bChaosModStarted)
 	{
-		ShowActivity2(0, "[SM] ", "Chaos Mod have ended!");
-		bChaosModStarted = false;
-		StopAllActiveEffects();
-		g_cooling_down_effects.Clear();
-		delete g_effect_timer;
-		delete g_panel_timer;
+		EndChaosMod();
 	}
 }
 
@@ -211,9 +228,9 @@ public void Cvar_TimeBetweenEffectsChanged(ConVar convar, char[] oldValue, char[
 	{
 		return;
 	}
-	delete g_effect_timer;
+	// delete g_effect_timer;
 	delete g_panel_timer;
-	g_effect_timer = CreateTimer(g_time_between_effects.FloatValue, Timer_StartRandomEffect, _, TIMER_REPEAT);
+	// g_effect_timer = CreateTimer(g_time_between_effects.FloatValue, Timer_StartRandomEffect, _, TIMER_REPEAT);
 	g_panel_timer = CreateTimer(PANEL_UPDATE_RATE, Timer_UpdatePanel, _, TIMER_REPEAT);
 }
 
@@ -341,7 +358,7 @@ void StartEffect(StringMap effect)
 		{
 			int time_left = 0;
 			other_effect.GetValue("time_left", time_left);
-			if (time_left <= 0) continue;
+			if (time_left < 0) continue;
 
 			char extent_type_buffer[255];
 			effect.GetString("extent_type", extent_type_buffer, sizeof(extent_type_buffer));
@@ -427,7 +444,9 @@ void StopEffect(StringMap active_effect)
 	
 	active_effect.GetString("cool_down_time", buffer, sizeof(buffer));
 	f_cool_down_time = Parse_ActiveTime(buffer);
-	cool_down_effect.SetValue("time_left", RoundToFloor(f_cool_down_time));
+	// Since the cool down effects duration is updated right after this, the time_left will be reduced by 1 second without actual 1 second real time
+	// so we correct that with this 
+	cool_down_effect.SetValue("time_left", RoundToFloor(f_cool_down_time) + 1);
 
 	g_cooling_down_effects.Push(cool_down_effect);
 }
@@ -486,20 +505,13 @@ public Action Timer_StartRandomEffect(Handle timer)
 // this is also used to update the effect timer as well
 public Action Timer_UpdatePanel(Handle timer, any unused)
 {
-	static int no_active_effects = 0;
 	static int time_until_next_effect = -1;
 
 	if (!g_enabled.BoolValue)
 	{
 		return Plugin_Handled;
 	}
-
-	// an effect was triggered manually / timer trigger next effect
-	if (no_active_effects != g_active_effects.Length || time_until_next_effect < 0)
-	{
-		time_until_next_effect = g_time_between_effects.IntValue;
-	}
-
+	
 	float pbar_fullness = 1 - (time_until_next_effect / g_time_between_effects.FloatValue);
 	for (int i = 1; i <= MaxClients; i++)
 	{
@@ -514,11 +526,6 @@ public Action Timer_UpdatePanel(Handle timer, any unused)
 		p.Send(i, Panel_DoNothing, RoundToFloor(PANEL_UPDATE_RATE) + 1);
 		delete p;
 	}
-
-	if (time_until_next_effect > 0)
-	{
-		time_until_next_effect--;
-	}
 	
 	for (int i = g_active_effects.Length - 1; i >= 0; i--)
 	{
@@ -527,19 +534,17 @@ public Action Timer_UpdatePanel(Handle timer, any unused)
 		int time_left;
 		active_effect.GetValue("time_left", time_left);
 
-		if (time_left <= 0)
+		if (time_left > 0)
+		{
+			active_effect.SetValue("time_left", time_left - 1);
+		}
+		else
 		{
 			g_active_effects.Erase(i);
 			StopEffect(active_effect);
 			delete active_effect;
 		}
-		else
-		{
-			active_effect.SetValue("time_left", time_left - 1);
-		}
-		
 	}
-	no_active_effects = g_active_effects.Length;
 
 	for (int i = g_cooling_down_effects.Length - 1; i >= 0; i--)
 	{
@@ -548,16 +553,27 @@ public Action Timer_UpdatePanel(Handle timer, any unused)
 		int time_left;
 		g_cooling_down_effect.GetValue("time_left", time_left);
 
-		if (time_left <= 0)
+		if (time_left > 0)
+		{
+			g_cooling_down_effect.SetValue("time_left", time_left - 1);
+		}
+		else
 		{
 			g_cooling_down_effects.Erase(i);
 			delete g_cooling_down_effect;
 		}
-		else
-		{
-			g_cooling_down_effect.SetValue("time_left", time_left - 1);
-		}
 		
+	}
+	
+	// an effect was triggered manually / timer trigger next effect
+	if (time_until_next_effect > 0)
+	{
+		time_until_next_effect--;
+	}
+	else
+	{
+		Timer_StartRandomEffect(timer);
+		time_until_next_effect = g_time_between_effects.IntValue;
 	}
 
 	return Plugin_Handled;
@@ -608,7 +624,8 @@ Panel CreateEffectPanel(int client, float pbar_fullness)
 
 	if (g_cooling_down_effects.Length > 0)
 	{
-		p.DrawText("=== Effects On Cool down ===");
+		p.DrawText(" ");
+		p.DrawText("======= Effects On Cool down =======");
 		for (int i = g_cooling_down_effects.Length - 1; i >= 0; i--)
 		{
 			StringMap cooling_down_effect = view_as<StringMap>(g_cooling_down_effects.Get(i));
